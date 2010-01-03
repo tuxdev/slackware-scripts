@@ -136,17 +136,19 @@ if_up() {
                echo "$0: /sbin/iwconfig \"$IFNAME\" channel \"$WLAN_CHANNEL\"" | $LOGGER
                /sbin/iwconfig "$IFNAME" channel "$WLAN_CHANNEL"
             fi
-            if test "$KEY" && ! test "$WPA" ; then
-               if test "$KEY" = "off" ; then
+            if test "$WLAN_KEY" && ! test "$WLAN_WPA" ; then
+               if test "$WLAN_KEY" = "off" ; then
                   echo "$0: /sbin/iwconfig \"$IFNAME\" key open" | $LOGGER
                   /sbin/iwconfig "$IFNAME" key open
                   echo "$0: /sbin/iwconfig \"$IFNAME\" key off" | $LOGGER
                   /sbin/iwconfig "$IFNAME" key off
                else
                   echo "$0: /sbin/iwconfig \"$IFNAME\" key ************" | $LOGGER
-                  /sbin/iwconfig "$IFNAME" key "$KEY"
-                  case "$KEY" in
+                  /sbin/iwconfig "$IFNAME" key $WLAN_KEY
+                  case "$WLAN_KEY" in
                      *open* | *restricted*)
+                        ;;
+                     *)
                         echo "$0: /sbin/iwconfig \"$IFNAME\" key restricted" | $LOGGER
                         /sbin/iwconfig "$IFNAME" key restricted
                         ;;
