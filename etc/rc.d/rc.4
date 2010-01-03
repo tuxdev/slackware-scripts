@@ -1,0 +1,29 @@
+#! /bin/sh
+# vim:ff=unix:enc=utf8:ts=3:sw=3:et
+
+# Tell the viewers what's going to happen...
+echo "Starting up X11 session manager..."
+
+push_back() {
+   list="$1"
+   shift 1
+   eval "$list=\"\$$list \$*\""
+}
+
+push_back disp_managers "/usr/bin/gdm"
+push_back disp_managers "/usr/sbin/gdm"
+push_back disp_managers "/opt/kde/bin/kdm"
+push_back disp_managers "/usr/bin/kdm"
+push_back disp_managers "/usr/bin/xdm"
+push_back disp_managers "/usr/X11/bin/xdm"
+
+for disp_manager in $disp_managers ; do
+   if test -x "$disp_manager" ; then
+      exec "$disp_manager" -nodaemon
+   fi
+done
+
+echo
+echo "Hey, you don't have KDM, GDM, or XDM.  Can't use runlevel 4 without"
+echo "one of those installed."
+sleep 30

@@ -1,0 +1,419 @@
+#!/bin/sh
+# vim:ff=unix:enc=utf8:ts=3:sw=3:et
+# /etc/rc.d/rc.inet1
+# This script is used to bring up the various network interfaces.
+#
+# @(#)/etc/rc.d/rc.inet1 10.2  Sun Jul 24 12:45:56 PDT 2005  (pjv)
+
+############################
+# READ NETWORK CONFIG FILE #
+############################
+
+# Get the configuration information from /etc/rc.d/rc.inet1.conf:
+
+. /etc/rc.d/rc.inet1.conf
+
+###########
+# LOGGING #
+###########
+
+# If possible, log events in /var/log/messages:
+if test -f /var/run/syslogd.pid && test -x /usr/bin/logger ; then
+   LOGGER=/usr/bin/logger
+else # output to stdout/stderr:
+   LOGGER=/bin/cat
+fi
+
+############################
+# DETERMINE INTERFACE LIST #
+############################
+
+if test "$DEBUG_ETH_UP" = "yes" ; then
+   echo "$0:  List of interfaces: '$INTERFACES'" | $LOGGER
+fi
+
+######################
+# LOOPBACK FUNCTIONS #
+######################
+
+# Function to bring up the loopback interface.  If loopback is
+# already up, do nothing.
+lo_up() {
+   if grep -q "lo:" /proc/net/dev ; then
+      if ! /sbin/ifconfig | grep -q "^lo" ; then
+         echo "$0:  /sbin/ifconfig lo 127.0.0.1" | $LOGGER
+         /sbin/ifconfig lo 127.0.0.1
+         echo "$0:  /sbin/route add -net 127.0.0.0 netmask 255.0.0.0 lo" | $LOGGER
+         /sbin/route add -net 127.0.0.0 netmask 255.0.0.0 lo
+      fi
+   fi
+}
+
+# Function to take down the loopback interface:
+lo_down() {
+   if grep -q "lo:" /proc/net/dev ; then
+      echo "$0:  /sbin/ifconfig lo down" | $LOGGER
+      /sbin/ifconfig lo down
+   fi
+}
+
+#######################
+# INTERFACE FUNCTIONS #
+#######################
+
+# Function to bring up a network interface.  If the interface is
+# already up or does not yet exist (perhaps because the kernel driver
+# is not loaded yet), do nothing.
+if_up() {
+   local IFNAME="$1"
+   # If the interface isn't in the kernel yet (but there's an alias for it in
+   # modules.conf), then it should be loaded first:
+   if ! grep -q "${IFNAME%%:*}:" /proc/net/dev ; then # no interface yet
+      if /sbin/modprobe -c | grep -v "^#" | grep -w "alias $IFNAME" | grep -vwq "alias $IFNAME off" ; then
+         echo "$1:  /sbin/modprobe $IFNAME" | $LOGGER
+         /sbin/modprobe "$IFNAME"
+      fi
+   fi
+   if grep -q "${IFNAME%%:*}:" /proc/net/dev ; then # no interface yet
+      eval "local HWADDR=\"\$HWADDR_$IFNAME\""
+      eval "local MTU=\"\$MTU_$IFNAME\""
+      eval "local USE_DHCP=\"\$USE_DHCP_$IFNAME\""
+      if ! /sbin/ifconfig | grep -q -w "$IFNAME" || ! /sbin/ifconfig "$IFNAME" | grep -q "inet addr" ; then # interface not up or not configured
+         if test "$HWADDR" ; then # Set hardware address _before_ the interface goes up:
+            echo "$0:  /sbin/ifconfig $IFNAME hw ether $HWADDR" | $LOGGER
+            /sbin/ifconfig "$IFNAME" hw ether "$HWADDR"
+         fi
+         if test "$MTU" ; then # Set MTU to something else than 1500
+           echo "$0:  /sbin/ifconfig "$IFNAME" mtu $MTU" | $LOGGER
+           /sbin/ifconfig "$IFNAME" mtu "$MTU"
+         fi
+         if grep -q "${1%%:*}:" /proc/net/wireless ; then
+            eval "local WLAN_CHANNEL=\"\$WLAN_CHANNEL_$IFNAME\""
+            eval "local WLAN_ESSID=\"\$WLAN_ESSID_$IFNAME\""
+            eval "local WLAN_FREQ=\"\$WLAN_FREQ_$IFNAME\""
+            eval "local WLAN_FRAG=\"\$WLAN_FRAG_$IFNAME\""
+            eval "local WLAN_IWCONFIG=\"\$WLAN_IWCONFIG_$IFNAME\""
+            eval "local WLAN_IWPRIV=\"\$WLAN_IWPRIV_$IFNAME\""
+            eval "local WLAN_IWSPY=\"\$WLAN_IWSPY_$IFNAME\""
+            eval "local WLAN_KEY=\"\$WLAN_KEY_$IFNAME\""
+            eval "local WLAN_MODE=\"\$WLAN_MODE_$IFNAME\""
+            eval "local WLAN_NICKNAME=\"\$WLAN_NICKNAME_$IFNAME\""
+            eval "local WLAN_NWID=\"\$WLAN_NWID_$IFNAME\""
+            eval "local WLAN_RATE=\"\$WLAN_RATE_$IFNAME\""
+            eval "local WLAN_RTS=\"\$WLAN_RTS_$IFNAME\""
+            eval "local WLAN_SENS=\"\$WLAN_SENS_$IFNAME\""
+            eval "local WLAN_WPA=\"\$WLAN_WPA_$IFNAME\""
+            eval "local WLAN_WPADRIVER=\"\$WLAN_WPADRIVER_$IFNAME\""
+            eval "local WLAN_WPACONF=\"\$WLAN_WPACONF_$IFNAME\""
+            eval "local WLAN_WPAWAIT=\"\$WLAN_WPAWAIT_$IFNAME\""
+            : "${WLAN_WPADRIVER:="wext"}"
+            : "${WLAN_WPACONF:="/etc/wpa_supplicant.conf"}"
+            : "${WLAN_WPAWAIT:="10"}"
+            if test "$MODE" ; then
+               echo "$0: /sbin/iwconfig \"$IFNAME\" mode \"$WLAN_MODE\"" | $LOGGER
+               if ! /sbin/iwconfig "$IFNAME" mode "$WLAN_MODE" 2> /dev/null ; then
+                  /sbin/ifconfig "$IFNAME"  down
+                  /sbin/iwconfig "$IFNAME" mode "$WLAN_MODE"
+                  /sbin/ifconfig "$IFNAME" up
+                  sleep 3
+               fi
+            fi
+            if ! test "$NICKNAME" ; then
+               WLAN_NICKNAME="$(/bin/hostname)"
+            fi
+            if test "$WLAN_ESSID" || test "$MODE" ; then
+               echo "$0: /sbin/iwconfig \"$IFNAME\" nick \"$WLAN_NICKNAME\"" | $LOGGER
+               /sbin/iwconfig "$IFNAME" nick "$WLAN_NICKNAME"
+            fi
+            if test "$WLAN_NWID" ; then
+               echo "$0: /sbin/iwconfig \"$IFNAME\" nwid \"$WLAN_NWID\"" | $LOGGER
+               /sbin/iwconfig "$IFNAME" nwid "$WLAN_NWID"
+            fi
+            if test "$WLAN_FREQ" ; then
+               echo "$0: /sbin/iwconfig \"$IFNAME\" freq \"$WLAN_FREQ\"" | $LOGGER
+               /sbin/iwconfig "$IFNAME" freq "$WLAN_FREQ"
+            elif test "$WLAN_CHANNEL" ; then
+               echo "$0: /sbin/iwconfig \"$IFNAME\" channel \"$WLAN_CHANNEL\"" | $LOGGER
+               /sbin/iwconfig "$IFNAME" channel "$WLAN_CHANNEL"
+            fi
+            if test "$KEY" && ! test "$WPA" ; then
+               if test "$KEY" = "off" ; then
+                  echo "$0: /sbin/iwconfig \"$IFNAME\" key open" | $LOGGER
+                  /sbin/iwconfig "$IFNAME" key open
+                  echo "$0: /sbin/iwconfig \"$IFNAME\" key off" | $LOGGER
+                  /sbin/iwconfig "$IFNAME" key off
+               else
+                  echo "$0: /sbin/iwconfig \"$IFNAME\" key ************" | $LOGGER
+                  /sbin/iwconfig "$IFNAME" key "$KEY"
+                  case "$KEY" in
+                     *open* | *restricted*)
+                        echo "$0: /sbin/iwconfig \"$IFNAME\" key restricted" | $LOGGER
+                        /sbin/iwconfig "$IFNAME" key restricted
+                        ;;
+                  esac
+               fi
+            fi
+            if test "$WLAN_SENS" ; then
+               echo "$0: /sbin/iwconfig \"$IFNAME\" sens \"$WLAN_SENS\"" | $LOGGER
+               /sbin/iwconfig "$IFNAME" sens "$WLAN_SENS"
+            fi
+            if test "$WLAN_RATE" ; then
+               echo "$0: /sbin/iwconfig \"$IFNAME\" rate \"$WLAN_RATE\"" | $LOGGER
+               /sbin/iwconfig "$IFNAME" rate "$WLAN_RATE"
+            fi
+            if test "$WLAN_RTS" ; then
+               echo "$0: /sbin/iwconfig \"$IFNAME\" rts \"$WLAN_RTS\"" | $LOGGER
+               /sbin/iwconfig "$IFNAME" rts "$WLAN_RTS"
+            fi
+            if test "$WLAN_FRAG" ; then
+               echo "$0: /sbin/iwconfig \"$IFNAME\" frag \"$WLAN_FRAG\"" | $LOGGER
+               /sbin/iwconfig "$IFNAME" frag "$WLAN_FRAG"
+            fi
+            if test "$WLAN_IWCONFIG" ; then
+               echo "$0: /sbin/iwconfig \"$IFNAME\" $WLAN_IWCONFIG" | $LOGGER
+               /sbin/iwconfig "$IFNAME" $WLAN_IWCONFIG
+            fi
+            if test "$WLAN_IWSPY" ; then
+               echo "$0: /sbin/iwspy \"$IFNAME\" $WLAN_IWSPY" | $LOGGER
+               /sbin/iwspy "$IFNAME" $WLAN_IWSPY
+            fi
+            # For RaLink cards, the SSID must be set right before configuring
+            # WPAPSK/TKIP parameters using iwpriv commands in order to generate
+            # the wpapsk password. This should not hurt other cards:
+            if test "$WLAN_ESSID" ; then
+               echo "$0: /sbin/iwconfig \"$IFNAME\" essid \"$WLAN_ESSID\"" | $LOGGER
+               /sbin/iwconfig "$IFNAME" essid "$WLAN_ESSID"
+            fi
+
+            # The iwpriv can set one private IOCTL at the time, so if the
+            # $IWPRIV variable contains multiple pipe ('|') separated settings,
+            # we split them here: WARNING: if your iwpriv commands contain a
+            # WEP/WPA key, these can be logged in /var/log/messages!
+            if test "$WLAN_IWPRIV" ; then
+               (
+                  IFS="|"
+                  for iwi in $WLAN_IWPRIV ; do
+                     if test "$iwi" ; then
+                        echo "$0: /sbin/iwpriv \"$IFNAME\" $iwi" | $LOGGER
+                        /sbin/iwpriv "$IFNAME" $iwi
+                     fi
+                  done
+               )
+            fi
+
+            ##################
+            # WPA_SUPPLICANT #
+            ##################
+
+            # Support for WPA (wireless protected access) is provided by
+            # wpa_supplicant for those drivers that support it (and it looks
+            # like wpa_supplicant is the future for WPA support in Linux
+            # anyway)
+            if test "$WLAN_WPA" = "wpa_supplicant" || "$WLAN_WPA" = "wpaxsupplicant" && -x /usr/sbin/wpa_supplicant ; then
+               /sbin/ifconfig "$IFNAME" down
+               local WPA_OPTIONS=""
+               test "$WLAN_WPADRIVER" && WPA_OPTIONS="-D$WLAN_WPADRIVER"
+               test "$WLAN_WPA" = "wpaxsupplicant" && WPA_OPTIONS="$WPA_OPTIONS -e"
+               local WPAPID="$(pgrep -f "wpa_supplicant.*$1")"
+               if test "$WPAPID" ; then
+                  echo "$0: wpa_supplicant found running already" | $LOGGER
+               else
+                  echo "$0: wpa_supplicant -B -c \"$WLAN_WPACONF\" $WPA_OPTIONS -i \"$IFNAME\"" | $LOGGER
+                  /usr/sbin/wpa_supplicant -B -c "$WLAN_WPACONF" $WPA_OPTIONS -i "$IFNAME"
+               fi
+               wi=0
+               while test "$wi" -lt "$WLAN_WPAWAIT" ; do
+                  wi=$(($wi+1))
+                  sleep 1
+                  if grep -q "^ctrl_interface=" "$WLAN_WPACONF" ; then
+                     if (LANG=C LC_ALL=C /usr/sbin/wpa_cli -i "$IFNAME" status | grep -q "^wpa_state=COMPLETED") ; then
+                        break
+                     fi
+                  else
+                     if (LANG=C LC_ALL=C /sbin/iwconfig "$IFNAME" | grep -Eq "Encryption key:....-") ; then
+                        break
+                     fi
+                  fi
+               done
+               if test "$wi" -eq "$WPAWAIT" ; then
+                  echo "WPA authentication did not complete, try running '$0 ${IFNAME}_start' in a few seconds." | $LOGGER
+               fi
+               /sbin/ifconfig "$IFNAME" up
+               sleep 3
+            else
+               # ESSID need to be last: most devices re-perform the
+               # scanning/discovery when this is set, and things like
+               # encryption keys had better be defined if we want to discover
+               # the right set of APs/nodes.
+               if test "$WLAN_ESSID" ; then
+                  echo "$0: /sbin/iwconfig \"$IFNAME\" essid \"$WLAN_ESSID\"" | $LOGGER
+                  /sbin/iwconfig "$IFNAME" essid "$WLAN_ESSID"
+               fi
+            fi
+         fi
+         if test "$USE_DHCP" = "yes" ; then # use DHCP to bring interface up
+            eval "local DHCP_HOSTNAME=\"\$DHCP_HOSTNAME_$IFNAME\""
+            eval "local DHCP_KEEPRESOLV=\"\$DHCP_KEEPRESOLV_$IFNAME\""
+            eval "local DHCP_KEEPNTP=\"\$DHCP_KEEPNTP_$IFNAME\""
+            eval "local DHCP_KEEPGW=\"\$DHCP_KEEPGW_$IFNAME\""
+            eval "local DHCP_DEBUG=\"\$DHCP_DEBUG_$IFNAME\""
+            eval "local DHCP_NOIPV4LL=\"\$DHCP_NOIPV4LL_$IFNAME\""
+            eval "local DHCP_IPADDR=\"\$DHCP_IPADDR_$IFNAME\""
+            eval "local DHCP_TIMEOUT=\"\$DHCP_TIMEOUT_$IFNAME\""
+            test "$DHCP_HOSTNAME" && DHCP_OPTIONS="-h \"$DHCP_HOSTNAME\""
+            test "$DHCP_KEEPRESOLV" = "yes" && DHCP_OPTIONS="$DHCP_OPTIONS -R"
+            test "$DHCP_KEEPNTP" = "yes" && DHCP_OPTIONS="$DHCP_OPTIONS -N"
+            test "$DHCP_KEEPGW" = "yes" && DHCP_OPTIONS="$DHCP_OPTIONS -G"
+            test "$DHCP_DEBUG" = "yes" && DHCP_OPTIONS="$DHCP_OPTIONS -d"
+            test "$DHCP_NOIPV4LL" = "yes" && DHCP_OPTIONS="$DHCP_OPTIONS -L"
+            test "$DHCP_IPADDR" && DHCP_OPTIONS="$DHCP_OPTIONS -s \"$DHCP_IPADDR\")"
+            echo "Polling for DHCP server on interface $IFNAME:"
+            # If you set a timeout, you get one, even if the kernel doesn't think
+            # that your device is connected, in case /sys isn't right (which it
+            # usually isn't except right after the device is loaded, when it
+            # usually is):
+
+            #### (start commented out)
+            # This is deactivated for now since the kernel has been returning
+            # incorrect results concerning whether the interface carrier is
+            # detected.
+            #if ! test "$DHCP_TIMEOUT" ; then
+            #   /sbin/ifconfig "$IFNAME" up && sleep 1
+            #   read CONNSTATUS < "/sys/class/net/$IFNAME/carrier"
+            #   /sbin/ifconfig "$IFNAME" down
+            #   if test "$CONNSTATUS" = "0" ; then
+            #      # The kernel has just told us the cable isn't even plugged in,
+            #      # but we will give any DHCP server a short chance to reply
+            #      # anyway:
+            #      echo "No carrier detected on $IFNAME.  Reducing DHCP timeout to 10 seconds."
+            #      DHCP_TIMEOUT=10
+            #   fi
+            #fi
+            #### (end commented out)
+
+            # 10 seconds should be a reasonable default DHCP timeout.  30 was too
+            # much.
+            echo "$0:  /sbin/dhcpcd -t ${DHCP_TIMEOUT:-10} $DHCP_OPTIONS \"$IFNAME\"" | $LOGGER
+            /sbin/dhcpcd -t ${DHCP_TIMEOUT:-10} ${DHCP_OPTIONS} "$IFNAME"
+         else # bring up interface using a static IP address
+            eval "local IPADDR=\"\$IPADDR_$IFNAME\""
+            eval "local NETMASK=\"\$NETMASK_$IFNAME\""
+            eval "local BROADCAST=\"\$BROADCAST_$IFNAME\""
+            eval "local NETWORK=\"\$NETMASK_$IFNAME\""
+            if test "$IPADDR" ; then # skip unconfigured interfaces
+               # Determine broadcast address from the IP address and netmask:
+               local IPMASK_OUTPUT="$(/bin/ipmask "$NETMASK" "$IPADDR")"
+               BROADCAST="${IPMASK_OUTPUT%% *}"
+               NETWORK="${IPMASK_OUTPUT#* }"
+               # Set up the network card:
+               echo "$0:  /sbin/ifconfig \"$IFNAME\" \"$IPADDR\" broadcast \"$BROADCAST\" netmask \"$NETMASK\"" | $LOGGER
+               /sbin/ifconfig "$IFNAME" "$IPADDR" broadcast "$BROADCAST" netmask "$NETMASK"
+            else
+               if test "$DEBUG_ETH_UP" = "yes" ; then
+                  echo "$0:  $IFNAME interface is not configured in /etc/rc.d/rc.inet1.conf" | $LOGGER
+               fi
+            fi
+         fi
+      else
+         test "$DEBUG_ETH_UP" = "yes" && echo "$0:  $IFNAME is already up, skipping" | $LOGGER
+      fi
+   else
+      if test "$DEBUG_ETH_UP" = "yes" ; then
+         echo "$0:  $IFNAME interface does not exist (yet)" | $LOGGER
+      fi
+   fi
+}
+
+# Function to take down a network interface:
+if_down() {
+   if grep -q "${1%%:*}:" /proc/net/dev ; then
+      if test "$(eval "echo \$USE_DHCP_$1"})" = "yes" ; then
+         echo "$0:  /sbin/dhcpcd -k -d ${1}" | $LOGGER
+         /sbin/dhcpcd -k -d "$1" 2> /dev/null || /sbin/ifconfig "$1" down
+         sleep 1
+      else
+         echo "$0:  /sbin/ifconfig $1 down" | $LOGGER
+         /sbin/ifconfig "$1" down
+      fi
+      if grep -q "${1%%:*}:" /proc/net/wireless ; then
+         local WPAPID="$(pgrep -f "wpa_supplicant.*$1")"
+         test "$WPAPID" && kill "$WPAPID"
+      fi
+   fi
+}
+
+#####################
+# GATEWAY FUNCTIONS #
+#####################
+
+# Function to bring up the gateway if there is not yet a default route:
+gateway_up() {
+  if ! /sbin/route -n | grep -q "^0.0.0.0" ; then
+    if test "$GATEWAY" ; then
+      echo "$0:  /sbin/route add default gw ${GATEWAY} metric 1" | $LOGGER
+      /sbin/route add default gw ${GATEWAY} metric 1 2>&1 | $LOGGER
+    fi
+  fi
+}
+
+# Function to take down an existing default gateway:
+gateway_down() {
+  if /sbin/route -n | grep -q "^0.0.0.0" ; then
+    echo "$0:  /sbin/route del default" | $LOGGER
+    /sbin/route del default
+  fi
+}
+
+# Function to start the network:
+start() {
+  lo_up
+  for IFNAME in $INTERFACES ; do
+     if_up "$IFNAME"
+  done
+  gateway_up
+}
+
+# Function to stop the network:
+stop() {
+  gateway_down
+  for IFNAME in $INTERFACES ; do
+     if_down "$IFNAME"
+  done
+  lo_down
+}
+
+
+############
+### MAIN ###
+############
+
+case "$1" in
+   'start' | 'up') # "start" brings up all configured interfaces:
+      start
+      ;;
+   'stop' | 'down') # "stop" takes down all configured interfaces:
+      stop
+      ;;
+   'restart') # "restart" restarts the network:
+      stop
+      start
+      ;;
+   *_start | *_up) # Example: "eth1_start" will start the specified interface 'eth1'
+      if_up "${1%_*}"
+      gateway_up
+      ;;
+   *_stop | *_down) # Example: "eth0_stop" will stop the specified interface 'eth0'
+      if_down "${1%_*}"
+      ;;
+   *_restart) # Example: "wlan0_restart" will take 'wlan0' down and up again
+      if_down "${1%_*}"
+      sleep 1
+      if_up "${1%_*}"
+      gateway_up
+      ;;
+   *) # The default is to bring up all configured interfaces:
+      start
+      ;;
+esac
+
+# End of /etc/rc.d/rc.inet1
