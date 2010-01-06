@@ -39,7 +39,7 @@ fi
 # Function to bring up the loopback interface.  If loopback is
 # already up, do nothing.
 lo_up() {
-   if grep -q "lo:" /proc/net/dev ; then
+   if test -e "/sys/class/net/lo" ; then
       if ! /sbin/ifconfig | grep -q "^lo" ; then
          echo "$0:  /sbin/ifconfig lo 127.0.0.1" | $LOGGER
          /sbin/ifconfig lo 127.0.0.1
@@ -51,7 +51,7 @@ lo_up() {
 
 # Function to take down the loopback interface:
 lo_down() {
-   if grep -q "lo:" /proc/net/dev ; then
+   if test -e "/sys/class/net/lo" ; then
       echo "$0:  /sbin/ifconfig lo down" | $LOGGER
       /sbin/ifconfig lo down
    fi
@@ -68,13 +68,13 @@ if_up() {
    local IFNAME="$1"
    # If the interface isn't in the kernel yet (but there's an alias for it in
    # modules.conf), then it should be loaded first:
-   if ! grep -q "${IFNAME%%:*}:" /proc/net/dev ; then # no interface yet
+   if ! test -e "/sys/class/net/$IFNAME" ; then # no interface yet
       if /sbin/modprobe -c | grep -v "^#" | grep -w "alias $IFNAME" | grep -vwq "alias $IFNAME off" ; then
          echo "$1:  /sbin/modprobe $IFNAME" | $LOGGER
          /sbin/modprobe "$IFNAME"
       fi
    fi
-   if grep -q "${IFNAME%%:*}:" /proc/net/dev ; then # no interface yet
+   if test -e "/sys/class/net/$IFNAME" ; then # interface exists
       eval "local HWADDR=\"\$HWADDR_$IFNAME\""
       eval "local MTU=\"\$MTU_$IFNAME\""
       eval "local USE_DHCP=\"\$USE_DHCP_$IFNAME\""
@@ -87,7 +87,7 @@ if_up() {
            echo "$0:  /sbin/ifconfig "$IFNAME" mtu $MTU" | $LOGGER
            /sbin/ifconfig "$IFNAME" mtu "$MTU"
          fi
-         if grep -q "${1%%:*}:" /proc/net/wireless ; then
+         if test -e "/sys/class/net/$IFNAME/wireless" ; then
             eval "local WLAN_CHANNEL=\"\$WLAN_CHANNEL_$IFNAME\""
             eval "local WLAN_ESSID=\"\$WLAN_ESSID_$IFNAME\""
             eval "local WLAN_FREQ=\"\$WLAN_FREQ_$IFNAME\""
@@ -328,7 +328,7 @@ if_up() {
 
 # Function to take down a network interface:
 if_down() {
-   if grep -q "${1%%:*}:" /proc/net/dev ; then
+   if test -e "/sys/class/net/$1" ; then
       if test "$(eval "echo \$USE_DHCP_$1"})" = "yes" ; then
          echo "$0:  /sbin/dhcpcd -k -d ${1}" | $LOGGER
          /sbin/dhcpcd -k -d "$1" 2> /dev/null || /sbin/ifconfig "$1" down
@@ -337,7 +337,7 @@ if_down() {
          echo "$0:  /sbin/ifconfig $1 down" | $LOGGER
          /sbin/ifconfig "$1" down
       fi
-      if grep -q "${1%%:*}:" /proc/net/wireless ; then
+      if test -e "/sys/class/net/$1/wireless" ; then
          local WPAPID="$(pgrep -f "wpa_supplicant.*$1")"
          test "$WPAPID" && kill "$WPAPID"
       fi
