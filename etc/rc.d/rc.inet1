@@ -211,7 +211,7 @@ if_up() {
             # wpa_supplicant for those drivers that support it (and it looks
             # like wpa_supplicant is the future for WPA support in Linux
             # anyway)
-            if test "$WLAN_WPA" = "wpa_supplicant" || "$WLAN_WPA" = "wpaxsupplicant" && -x /usr/sbin/wpa_supplicant ; then
+            if test "$WLAN_WPA" = "wpa_supplicant" || test "$WLAN_WPA" = "wpaxsupplicant" && test -x /usr/sbin/wpa_supplicant ; then
                /sbin/ifconfig "$IFNAME" down
                local WPA_OPTIONS=""
                test "$WLAN_WPADRIVER" && WPA_OPTIONS="-D$WLAN_WPADRIVER"
